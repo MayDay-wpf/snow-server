@@ -1,0 +1,103 @@
+/* 复古风格全局样式 */
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  /* 复古配色 - 米色/棕色调（浅色主题） */
+  --color-bg: #f5f0e6;
+  --color-bg-card: #faf7f2;
+  --color-bg-input: #fff;
+  --color-bg-input-focus: #fffef8;
+  --color-text: #2c2416;
+  --color-text-muted: #6b5d4d;
+  --color-text-light: #8a7a6a;
+  --color-border: #2c2416;
+  --color-border-light: #d4c9b8;
+  --color-accent: #4a5a4a;
+  --color-error: #c53030;
+  --color-error-bg: #fff5f5;
+
+  /* 字体 */
+  font-family: "Georgia", "Times New Roman", serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 深色主题 */
+[data-theme="dark"] {
+  --color-bg: #1a150d;
+  --color-bg-card: #252018;
+  --color-bg-input: #2c2416;
+  --color-bg-input-focus: #352d1e;
+  --color-text: #f5f0e6;
+  --color-text-muted: #b8a88a;
+  --color-text-light: #8a7a6a;
+  --color-border: #d4c9b8;
+  --color-border-light: #4a4238;
+  --color-accent: #6a7a6a;
+  --color-error: #f56565;
+  --color-error-bg: #3d2020;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+/* 链接样式 */
+a {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+a:hover {
+  color: var(--color-text);
+}
+
+/* 按钮重置 */
+button {
+  font-family: inherit;
+}
+
+/* 输入框重置 */
+input {
+  font-family: inherit;
+}
+
+/* 选中文本颜色 */
+::selection {
+  background: var(--color-text);
+  color: var(--color-bg);
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border: 1px solid var(--color-border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
