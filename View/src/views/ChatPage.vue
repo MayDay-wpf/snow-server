@@ -460,6 +460,7 @@ const sessionListState = ref<SessionListState>({
 const suppressAtTriggerOnce = ref(false);
 const isAssistantLoading = ref(false);
 const isHistoryLoading = ref(false);
+const shouldPollAfterAssistantEvent = ref(false);
 
 const parsedMessages = computed(() => sessionData.value?.messages || []);
 const filteredFileOptions = computed(() => {
@@ -525,6 +526,7 @@ const applyInFlightState = (inFlightState?: SessionData["inFlightState"]) => {
     pendingToolConfirmations.value = [];
     pendingQuestions.value = [];
     pendingRollbackConfirmation.value = null;
+    isAssistantLoading.value = false;
     return;
   }
 
@@ -626,20 +628,51 @@ const requestContextInfo = async (options?: { silent?: boolean }) => {
 const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-const isInteractionSettled = () =>
-  !isAssistantLoading.value &&
-  pendingToolConfirmations.value.length === 0 &&
-  pendingQuestions.value.length === 0 &&
-  !pendingRollbackConfirmation.value;
+const hasPendingInteraction = () =>
+  pendingToolConfirmations.value.length > 0 ||
+  pendingQuestions.value.length > 0 ||
+  Boolean(pendingRollbackConfirmation.value);
 
-const refreshContextUntilSettled = async () => {
-  const maxAttempts = 4;
-  for (let i = 0; i < maxAttempts; i++) {
-    await requestContextInfo({ silent: true });
-    await sleep(250);
-    if (isInteractionSettled()) {
-      return;
+const isInteractionSettled = () =>
+  !isAssistantLoading.value && !hasPendingInteraction();
+
+let refreshContextTask: Promise<void> | null = null;
+
+const refreshContextUntilSettled = async (options?: {
+  initialDelayMs?: number;
+}) => {
+  if (!shouldPollAfterAssistantEvent.value) {
+    return;
+  }
+
+  if (refreshContextTask) {
+    return refreshContextTask;
+  }
+
+  refreshContextTask = (async () => {
+    const initialDelayMs = options?.initialDelayMs ?? 450;
+    if (initialDelayMs > 0) {
+      await sleep(initialDelayMs);
     }
+
+    const maxAttempts = 6;
+    for (let i = 0; i < maxAttempts; i++) {
+      if (!shouldPollAfterAssistantEvent.value) {
+        return;
+      }
+      await requestContextInfo({ silent: true });
+      await sleep(600);
+      if (isInteractionSettled()) {
+        shouldPollAfterAssistantEvent.value = false;
+        return;
+      }
+    }
+  })();
+
+  try {
+    await refreshContextTask;
+  } finally {
+    refreshContextTask = null;
   }
 };
 
@@ -656,6 +689,7 @@ const sendMessage = async () => {
     { role: "user", content, timestamp: Date.now() },
   ];
 
+  shouldPollAfterAssistantEvent.value = false;
   isAssistantLoading.value = true;
   try {
     await instanceHub.sendMessageToInstance(instanceId.value, content);
@@ -897,6 +931,13 @@ const setupListeners = () => {
       if (parsed) {
         sessionData.value = parsed;
         applyInFlightState(parsed.inFlightState);
+        if (
+          shouldPollAfterAssistantEvent.value &&
+          isAssistantLoading.value &&
+          !hasPendingInteraction()
+        ) {
+          void refreshContextUntilSettled({ initialDelayMs: 600 });
+        }
       }
     }
   );
@@ -904,20 +945,24 @@ const setupListeners = () => {
   unsubReply = instanceHub.onMessageReplyReceived(
     (receivedInstanceId, replyMessage) => {
       if (receivedInstanceId !== instanceId.value) return;
-      isAssistantLoading.value = false;
       isHistoryLoading.value = false;
       const parsed = parseContextInfo(replyMessage);
       if (parsed?.messages) {
         sessionData.value = parsed;
         applyInFlightState(parsed.inFlightState);
-      } else addAssistantText(replyMessage);
+      } else {
+        addAssistantText(replyMessage);
+      }
+      shouldPollAfterAssistantEvent.value = true;
+      void refreshContextUntilSettled({ initialDelayMs: 600 });
     }
   );
 
   unsubProcessingCompleted = instanceHub.onMessageProcessingCompleted(
     (receivedInstanceId) => {
       if (receivedInstanceId !== instanceId.value) return;
-      isAssistantLoading.value = false;
+      shouldPollAfterAssistantEvent.value = true;
+      void refreshContextUntilSettled({ initialDelayMs: 600 });
     }
   );
 

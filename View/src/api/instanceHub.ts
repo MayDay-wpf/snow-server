@@ -273,11 +273,6 @@ class InstanceHubManager {
     this.connection.on(
       "ReceiveContextInfo",
       (instanceId: string, contextData: string) => {
-        console.log(
-          "Received context info from instance:",
-          instanceId,
-          contextData
-        );
         this.notifyContextInfoReceived(instanceId, contextData);
       }
     );
