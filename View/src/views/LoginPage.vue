@@ -157,9 +157,6 @@ const handleLogin = async () => {
         saveUserInfo(result.data.user);
       }
 
-      alert.success(t("login.loginSuccess") || "Login successful!");
-      console.log("Login successful:", result.data);
-
       // 跳转到主页
       router.push({ name: "home" });
     } else {
@@ -432,7 +429,17 @@ const handleInstallApp = async () => {
   justify-content: center;
   padding: 20px;
   position: relative;
-  background: repeating-linear-gradient(
+  background: radial-gradient(
+      circle at 16% 32%,
+      rgba(44, 36, 22, 0.065) 0.6px,
+      transparent 0.75px
+    ),
+    radial-gradient(
+      circle at 78% 68%,
+      rgba(44, 36, 22, 0.05) 0.6px,
+      transparent 0.75px
+    ),
+    repeating-linear-gradient(
       0deg,
       transparent,
       transparent 2px,
@@ -445,6 +452,7 @@ const handleInstallApp = async () => {
       var(--color-bg-card) 50%,
       var(--color-bg) 100%
     );
+  background-size: 3px 3px, 5px 5px, auto, auto;
 }
 
 /* 设置按钮 */

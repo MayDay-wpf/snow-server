@@ -4,6 +4,7 @@ import { refreshToken as refreshTokenApi } from "../api/auth";
 import { saveToken, saveRefreshToken, clearAuth } from "../utils/auth";
 import LoginPage from "../views/LoginPage.vue";
 import HomePage from "../views/HomePage.vue";
+import ChatPage from "../views/ChatPage.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -12,6 +13,12 @@ const router = createRouter({
       path: "/",
       name: "home",
       component: HomePage,
+      meta: { requiresAuth: true },
+    },
+    {
+      path: "/chat/:instanceId",
+      name: "chat",
+      component: ChatPage,
       meta: { requiresAuth: true },
     },
     {

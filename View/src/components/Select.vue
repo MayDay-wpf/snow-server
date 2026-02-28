@@ -173,9 +173,10 @@ onUnmounted(() => {
   right: 0;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  z-index: 100;
+  z-index: 1000;
   max-height: 200px;
   overflow-y: auto;
+  box-shadow: 4px 4px 0 rgba(44, 36, 22, 0.1);
 }
 
 .select-option {

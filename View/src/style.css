@@ -18,6 +18,16 @@
   --color-error: #c53030;
   --color-error-bg: #fff5f5;
 
+  /* 现代主题变量（与HomePage/ChatPage兼容） */
+  --bg-primary: #f5f0e6;
+  --bg-secondary: #faf7f2;
+  --bg-code: #1e1e1e;
+  --text-primary: #2c2416;
+  --text-secondary: #6b5d4d;
+  --text-code: #d4d4d4;
+  --border-color: #d4c9b8;
+  --color-accent-rgb: 74, 90, 74;
+
   /* 字体 */
   font-family: "Georgia", "Times New Roman", serif;
   font-size: 16px;
@@ -45,6 +55,16 @@
   --color-accent: #6a7a6a;
   --color-error: #f56565;
   --color-error-bg: #3d2020;
+
+  /* 现代主题变量（深色模式） */
+  --bg-primary: #1a150d;
+  --bg-secondary: #252018;
+  --bg-code: #1e1e1e;
+  --text-primary: #f5f0e6;
+  --text-secondary: #b8a88a;
+  --text-code: #d4d4d4;
+  --border-color: #4a4238;
+  --color-accent-rgb: 106, 122, 106;
 }
 
 body {

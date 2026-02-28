@@ -1,0 +1,502 @@
+<template>
+  <div class="messages-area" ref="messagesArea">
+    <div
+      v-if="messages.length === 0 && !isAssistantLoading"
+      class="empty-state"
+    >
+      <div class="empty-text">{{ t("chat.noMessages") }}</div>
+    </div>
+
+    <div
+      v-for="(message, index) in messages"
+      :key="index"
+      :class="['message-wrapper', message.role]"
+    >
+      <div class="message-header">
+        <div class="role-badge" :class="message.role">
+          {{ getRoleLabel(message.role) }}
+        </div>
+        <span class="message-time">{{ formatTime(message.timestamp) }}</span>
+        <button
+          v-if="message.role === 'user'"
+          class="rollback-button"
+          @click="$emit('rollback-message', index)"
+        >
+          {{ t("chat.rollback") }}
+        </button>
+      </div>
+
+      <div class="message-content">
+        <div
+          v-if="
+            message.content &&
+            !message.tool_call_id &&
+            message.role === 'assistant'
+          "
+          class="text-content markdown-content"
+          v-html="formatAssistantContent(message.content)"
+        ></div>
+        <div
+          v-else-if="message.content && !message.tool_call_id"
+          class="text-content plain-text-content"
+        >
+          {{ message.content }}
+        </div>
+
+        <div v-if="message.tool_calls?.length" class="tool-calls">
+          <div
+            v-for="tool in message.tool_calls"
+            :key="tool.id"
+            class="tool-call"
+          >
+            <div class="tool-header" @click="$emit('toggle-tool', tool.id)">
+              <span class="tool-name">{{ tool.function.name }}</span>
+              <span
+                class="tool-toggle"
+                :class="{ expanded: expandedToolIds.includes(tool.id) }"
+              >
+                <ChevronRight :size="14" />
+              </span>
+            </div>
+            <div v-show="expandedToolIds.includes(tool.id)" class="tool-body">
+              <div class="section-label">参数:</div>
+              <pre
+                class="code-block highlighted"
+                v-html="formatJsonHighlighted(tool.function.arguments)"
+              ></pre>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="message.tool_call_id" class="tool-result">
+          <div
+            class="tool-header result"
+            @click="$emit('toggle-tool', message.tool_call_id)"
+          >
+            <span class="tool-name">{{ t("chat.toolResult") }}</span>
+            <span class="tool-id">{{ message.tool_call_id.slice(-8) }}</span>
+            <span
+              class="tool-toggle"
+              :class="{
+                expanded: expandedToolIds.includes(message.tool_call_id),
+              }"
+            >
+              <ChevronRight :size="14" />
+            </span>
+          </div>
+          <div
+            v-show="expandedToolIds.includes(message.tool_call_id)"
+            class="tool-body"
+          >
+            <pre
+              class="code-block highlighted"
+              v-html="formatJsonHighlighted(message.content)"
+            ></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="isAssistantLoading"
+      class="message-wrapper assistant loading-wrapper"
+    >
+      <div class="message-header">
+        <div class="role-badge assistant">{{ t("chat.roleAssistant") }}</div>
+      </div>
+      <div class="message-content loading-content">
+        {{ t("chat.thinking") }}
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ChevronRight } from "lucide-vue-next";
+import hljs from "highlight.js/lib/core";
+import hljsDarkCssUrl from "highlight.js/styles/github-dark.css?url";
+import hljsLightCssUrl from "highlight.js/styles/github.css?url";
+import json from "highlight.js/lib/languages/json";
+import javascript from "highlight.js/lib/languages/javascript";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import MarkdownIt from "markdown-it";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+
+hljs.registerLanguage("json", json);
+hljs.registerLanguage("javascript", javascript);
+hljs.registerLanguage("js", javascript);
+hljs.registerLanguage("typescript", typescript);
+hljs.registerLanguage("ts", typescript);
+hljs.registerLanguage("xml", xml);
+hljs.registerLanguage("html", xml);
+
+const hljsThemeStyleId = "chat-message-hljs-theme";
+let hljsThemeObserver: MutationObserver | null = null;
+
+const syncHighlightTheme = () => {
+  if (typeof document === "undefined") return;
+
+  const theme = document.documentElement.getAttribute("data-theme");
+  const href = theme === "dark" ? hljsDarkCssUrl : hljsLightCssUrl;
+  let link = document.getElementById(
+    hljsThemeStyleId
+  ) as HTMLLinkElement | null;
+
+  if (!link) {
+    link = document.createElement("link");
+    link.id = hljsThemeStyleId;
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+  }
+
+  if (link.href !== href) {
+    link.href = href;
+  }
+};
+
+onMounted(() => {
+  syncHighlightTheme();
+
+  hljsThemeObserver = new MutationObserver(() => {
+    syncHighlightTheme();
+  });
+  hljsThemeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+});
+
+onBeforeUnmount(() => {
+  hljsThemeObserver?.disconnect();
+  hljsThemeObserver = null;
+});
+
+const highlightCode = (code: string, language?: string) => {
+  if (!code) return "";
+
+  const normalizedLang = (language || "").toLowerCase();
+  if (normalizedLang && hljs.getLanguage(normalizedLang)) {
+    return hljs.highlight(code, {
+      language: normalizedLang,
+      ignoreIllegals: true,
+    }).value;
+  }
+
+  return hljs.highlightAuto(code, ["json", "javascript", "typescript", "xml"])
+    .value;
+};
+
+interface ToolCall {
+  id: string;
+  type: string;
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+interface MessageItem {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  timestamp: number;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+}
+
+const props = defineProps<{
+  messages: MessageItem[];
+  expandedToolIds: string[];
+  isAssistantLoading: boolean;
+}>();
+defineEmits<{
+  (e: "toggle-tool", toolId: string): void;
+  (e: "rollback-message", messageIndex: number): void;
+}>();
+
+const messagesArea = ref<HTMLElement | null>(null);
+const markdown = new MarkdownIt({
+  html: false,
+  breaks: true,
+  linkify: true,
+  typographer: true,
+  highlight: (code: string, language: string) => {
+    const languageClass = language ? ` language-${language}` : "";
+    const highlighted = highlightCode(code, language);
+    return `<pre class="hljs"><code class="hljs${languageClass}">${highlighted}</code></pre>`;
+  },
+});
+
+watch(
+  [() => props.messages, () => props.isAssistantLoading],
+  async () => {
+    await nextTick();
+    if (messagesArea.value) {
+      messagesArea.value.scrollTop = messagesArea.value.scrollHeight;
+    }
+  },
+  { deep: true }
+);
+
+const formatTime = (timestamp: number) => {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  return date.toLocaleString("zh-CN", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const getRoleLabel = (role: string) => {
+  const labels: Record<string, string> = {
+    user: t("chat.roleUser"),
+    assistant: t("chat.roleAssistant"),
+    tool: t("chat.roleTool"),
+  };
+  return labels[role] || role;
+};
+
+const formatAssistantContent = (content: string) => {
+  if (!content) return "";
+  return markdown.render(content);
+};
+
+const formatJsonHighlighted = (data: string | object) => {
+  try {
+    const obj = typeof data === "string" ? JSON.parse(data) : data;
+    return hljs.highlight(JSON.stringify(obj, null, 2), {
+      language: "json",
+      ignoreIllegals: true,
+    }).value;
+  } catch {
+    return hljs.highlightAuto(String(data), [
+      "json",
+      "javascript",
+      "typescript",
+    ]).value;
+  }
+};
+</script>
+
+<style scoped>
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 1rem 0;
+  box-sizing: border-box;
+}
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-secondary);
+}
+.message-wrapper {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+}
+.message-wrapper.user {
+  align-self: flex-end;
+}
+.message-wrapper.assistant,
+.message-wrapper.tool {
+  align-self: flex-start;
+}
+.message-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 0 4px;
+}
+.role-badge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.role-badge.user {
+  background-color: var(--color-accent);
+  color: var(--color-bg);
+}
+.role-badge.assistant {
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+.role-badge.tool {
+  background-color: var(--text-secondary);
+  color: var(--color-bg);
+}
+.message-time {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.rollback-button {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.message-wrapper:hover .rollback-button {
+  opacity: 1;
+}
+.rollback-button:hover {
+  background: var(--bg-primary);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.message-content {
+  padding: 14px 18px;
+  border-radius: 5px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.message-wrapper.user .message-content {
+  background-color: var(--color-accent);
+  color: var(--color-bg);
+  border-bottom-right-radius: 4px;
+}
+.message-wrapper.assistant .message-content {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary);
+}
+.message-wrapper.tool .message-content {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text-primary);
+}
+.text-content {
+  word-wrap: break-word;
+}
+.plain-text-content {
+  white-space: pre-wrap;
+}
+.markdown-content :deep(p) {
+  margin: 0 0 8px;
+}
+.markdown-content :deep(p:last-child) {
+  margin-bottom: 0;
+}
+.markdown-content :deep(code) {
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+.markdown-content :deep(pre) {
+  margin: 8px 0;
+  padding: 10px;
+  background: var(--bg-code, #1e1e1e);
+  color: var(--text-code, #d4d4d4);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.loading-wrapper {
+  opacity: 0.9;
+}
+.loading-content {
+  padding: 0;
+  color: var(--text-secondary);
+}
+.tool-calls,
+.tool-result {
+  margin-top: 12px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+}
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: var(--bg-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.tool-header.result {
+  background-color: rgba(var(--color-accent-rgb, 99, 102, 241), 0.1);
+}
+.tool-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.tool-id {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+.tool-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: transform 0.2s ease;
+}
+.tool-toggle.expanded {
+  transform: rotate(90deg);
+}
+.tool-body {
+  padding: 14px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+}
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.code-block {
+  margin: 0;
+  padding: 12px;
+  background-color: var(--bg-code);
+  color: var(--text-code);
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.code-block.highlighted {
+  overflow-x: auto;
+}
+.tool-body .code-block.highlighted {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+:global([data-theme="dark"]) .tool-body .code-block.highlighted {
+  background-color: #0d1117 !important;
+  color: #c9d1d9 !important;
+}
+.markdown-content :deep(pre.hljs),
+.code-block.highlighted {
+  border-radius: 6px;
+}
+.markdown-content :deep(pre.hljs) {
+  background: transparent;
+  padding: 0;
+}
+</style>
