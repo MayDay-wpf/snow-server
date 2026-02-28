@@ -119,6 +119,7 @@
       :parsed-messages="parsedMessages"
       :expanded-tool-ids="expandedToolIds"
       :is-assistant-loading="isAssistantLoading"
+      :is-history-loading="isHistoryLoading"
       :pending-tool-confirmations="pendingToolConfirmations"
       :pending-questions="pendingQuestions"
       :pending-rollback-confirmation="pendingRollbackConfirmation"
@@ -386,11 +387,14 @@ const toggleHistoryList = async (event?: Event) => {
 };
 
 const resumeSessionById = async (sessionId: string) => {
+  isHistoryLoading.value = true;
+  sessionData.value = { messages: [] };
   try {
     await ensureHubConnected();
     await instanceHub.sendResumeSession(instanceId.value, sessionId);
     closeHistoryDrawer();
   } catch {
+    isHistoryLoading.value = false;
     addAssistantText(t("chat.historyResumeFailed"));
   }
 };
@@ -433,6 +437,7 @@ const sessionListState = ref<SessionListState>({
 });
 const suppressAtTriggerOnce = ref(false);
 const isAssistantLoading = ref(false);
+const isHistoryLoading = ref(false);
 
 const parsedMessages = computed(() => sessionData.value?.messages || []);
 const filteredFileOptions = computed(() => {
@@ -519,10 +524,15 @@ const ensureHubConnected = async () => {
     await waitForConnection(10000);
   }
 };
-
 const requestContextInfo = async () => {
-  await ensureHubConnected();
-  await instanceHub.requestContextInfo(instanceId.value);
+  isHistoryLoading.value = true;
+  try {
+    await ensureHubConnected();
+    await instanceHub.requestContextInfo(instanceId.value);
+  } catch {
+    isHistoryLoading.value = false;
+    throw new Error("request context failed");
+  }
 };
 
 const sendMessage = async () => {
@@ -755,6 +765,7 @@ const setupListeners = () => {
   unsubContext = instanceHub.onContextInfoReceived(
     (receivedInstanceId, data) => {
       if (receivedInstanceId !== instanceId.value) return;
+      isHistoryLoading.value = false;
       const parsed = parseContextInfo(data);
       if (parsed) sessionData.value = parsed;
     }
@@ -764,6 +775,7 @@ const setupListeners = () => {
     (receivedInstanceId, replyMessage) => {
       if (receivedInstanceId !== instanceId.value) return;
       isAssistantLoading.value = false;
+      isHistoryLoading.value = false;
       const parsed = parseContextInfo(replyMessage);
       if (parsed?.messages) sessionData.value = parsed;
       else addAssistantText(replyMessage);
@@ -926,13 +938,21 @@ const setupListeners = () => {
 onMounted(async () => {
   initInstanceInfo();
   setupListeners();
-  await requestContextInfo();
+  try {
+    await requestContextInfo();
+  } catch {
+    addAssistantText(t("chat.historyListRequestFailed"));
+  }
 });
 
 onActivated(async () => {
   initInstanceInfo();
   setupListeners();
-  await requestContextInfo();
+  try {
+    await requestContextInfo();
+  } catch {
+    addAssistantText(t("chat.historyListRequestFailed"));
+  }
 });
 
 onDeactivated(() => {

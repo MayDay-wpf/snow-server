@@ -1,113 +1,124 @@
 <template>
   <div class="messages-area" ref="messagesArea">
-    <div
-      v-if="messages.length === 0 && !isAssistantLoading"
-      class="empty-state"
-    >
-      <div class="empty-text">{{ t("chat.noMessages") }}</div>
+    <div v-if="isHistoryLoading" class="history-loading-state">
+      <div class="history-loading-card">
+        <div class="history-loading-spinner"></div>
+        <div class="history-loading-text">
+          {{ t("chat.historyListLoading") }}
+        </div>
+      </div>
     </div>
 
-    <div
-      v-for="(message, index) in messages"
-      :key="index"
-      :class="['message-wrapper', message.role]"
-    >
-      <div class="message-header">
-        <div class="role-badge" :class="message.role">
-          {{ getRoleLabel(message.role) }}
-        </div>
-        <span class="message-time">{{ formatTime(message.timestamp) }}</span>
-        <button
-          v-if="message.role === 'user'"
-          class="rollback-button"
-          @click="$emit('rollback-message', index)"
-        >
-          {{ t("chat.rollback") }}
-        </button>
+    <template v-else>
+      <div
+        v-if="messages.length === 0 && !isAssistantLoading"
+        class="empty-state"
+      >
+        <div class="empty-text">{{ t("chat.noMessages") }}</div>
       </div>
 
-      <div class="message-content">
-        <div
-          v-if="
-            message.content &&
-            !message.tool_call_id &&
-            message.role === 'assistant'
-          "
-          class="text-content markdown-content"
-          v-html="formatAssistantContent(message.content)"
-        ></div>
-        <div
-          v-else-if="message.content && !message.tool_call_id"
-          class="text-content plain-text-content"
-        >
-          {{ message.content }}
+      <div
+        v-for="(message, index) in messages"
+        :key="index"
+        :class="['message-wrapper', message.role]"
+      >
+        <div class="message-header">
+          <div class="role-badge" :class="message.role">
+            {{ getRoleLabel(message.role) }}
+          </div>
+          <span class="message-time">{{ formatTime(message.timestamp) }}</span>
+          <button
+            v-if="message.role === 'user'"
+            class="rollback-button"
+            @click="$emit('rollback-message', index)"
+          >
+            {{ t("chat.rollback") }}
+          </button>
         </div>
 
-        <div v-if="message.tool_calls?.length" class="tool-calls">
+        <div class="message-content">
           <div
-            v-for="tool in message.tool_calls"
-            :key="tool.id"
-            class="tool-call"
+            v-if="
+              message.content &&
+              !message.tool_call_id &&
+              message.role === 'assistant'
+            "
+            class="text-content markdown-content"
+            v-html="formatAssistantContent(message.content)"
+          ></div>
+          <div
+            v-else-if="message.content && !message.tool_call_id"
+            class="text-content plain-text-content"
           >
-            <div class="tool-header" @click="$emit('toggle-tool', tool.id)">
-              <span class="tool-name">{{ tool.function.name }}</span>
+            {{ message.content }}
+          </div>
+
+          <div v-if="message.tool_calls?.length" class="tool-calls">
+            <div
+              v-for="tool in message.tool_calls"
+              :key="tool.id"
+              class="tool-call"
+            >
+              <div class="tool-header" @click="$emit('toggle-tool', tool.id)">
+                <span class="tool-name">{{ tool.function.name }}</span>
+                <span
+                  class="tool-toggle"
+                  :class="{ expanded: expandedToolIds.includes(tool.id) }"
+                >
+                  <ChevronRight :size="14" />
+                </span>
+              </div>
+              <div v-show="expandedToolIds.includes(tool.id)" class="tool-body">
+                <div class="section-label">参数:</div>
+                <pre
+                  class="code-block highlighted"
+                  v-html="formatJsonHighlighted(tool.function.arguments)"
+                ></pre>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="message.tool_call_id" class="tool-result">
+            <div
+              class="tool-header result"
+              @click="$emit('toggle-tool', message.tool_call_id)"
+            >
+              <span class="tool-name">{{ t("chat.toolResult") }}</span>
+              <span class="tool-id">{{ message.tool_call_id.slice(-8) }}</span>
               <span
                 class="tool-toggle"
-                :class="{ expanded: expandedToolIds.includes(tool.id) }"
+                :class="{
+                  expanded: expandedToolIds.includes(message.tool_call_id),
+                }"
               >
                 <ChevronRight :size="14" />
               </span>
             </div>
-            <div v-show="expandedToolIds.includes(tool.id)" class="tool-body">
-              <div class="section-label">参数:</div>
+            <div
+              v-show="expandedToolIds.includes(message.tool_call_id)"
+              class="tool-body"
+            >
               <pre
                 class="code-block highlighted"
-                v-html="formatJsonHighlighted(tool.function.arguments)"
+                v-html="formatJsonHighlighted(message.content)"
               ></pre>
             </div>
           </div>
         </div>
+      </div>
 
-        <div v-if="message.tool_call_id" class="tool-result">
-          <div
-            class="tool-header result"
-            @click="$emit('toggle-tool', message.tool_call_id)"
-          >
-            <span class="tool-name">{{ t("chat.toolResult") }}</span>
-            <span class="tool-id">{{ message.tool_call_id.slice(-8) }}</span>
-            <span
-              class="tool-toggle"
-              :class="{
-                expanded: expandedToolIds.includes(message.tool_call_id),
-              }"
-            >
-              <ChevronRight :size="14" />
-            </span>
-          </div>
-          <div
-            v-show="expandedToolIds.includes(message.tool_call_id)"
-            class="tool-body"
-          >
-            <pre
-              class="code-block highlighted"
-              v-html="formatJsonHighlighted(message.content)"
-            ></pre>
-          </div>
+      <div
+        v-if="isAssistantLoading"
+        class="message-wrapper assistant loading-wrapper"
+      >
+        <div class="message-header">
+          <div class="role-badge assistant">{{ t("chat.roleAssistant") }}</div>
+        </div>
+        <div class="message-content loading-content">
+          {{ t("chat.thinking") }}
         </div>
       </div>
-    </div>
-
-    <div
-      v-if="isAssistantLoading"
-      class="message-wrapper assistant loading-wrapper"
-    >
-      <div class="message-header">
-        <div class="role-badge assistant">{{ t("chat.roleAssistant") }}</div>
-      </div>
-      <div class="message-content loading-content">
-        {{ t("chat.thinking") }}
-      </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -211,6 +222,7 @@ const props = defineProps<{
   messages: MessageItem[];
   expandedToolIds: string[];
   isAssistantLoading: boolean;
+  isHistoryLoading: boolean;
 }>();
 defineEmits<{
   (e: "toggle-tool", toolId: string): void;
@@ -299,6 +311,43 @@ const formatJsonHighlighted = (data: string | object) => {
   justify-content: center;
   height: 100%;
   color: var(--text-secondary);
+}
+.history-loading-state {
+  flex: 1;
+  min-height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.history-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.history-loading-spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--color-accent);
+  animation: history-loading-spin 0.8s linear infinite;
+}
+.history-loading-text {
+  white-space: nowrap;
+}
+@keyframes history-loading-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 .message-wrapper {
   display: flex;

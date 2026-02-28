@@ -6,6 +6,7 @@
           :messages="parsedMessages"
           :expanded-tool-ids="expandedToolIds"
           :is-assistant-loading="isAssistantLoading"
+          :is-history-loading="isHistoryLoading"
           @toggle-tool="emit('toggle-tool', $event)"
           @rollback-message="emit('rollback-message', $event)"
         />
@@ -227,6 +228,7 @@ const props = defineProps<{
   parsedMessages: ParsedMessage[];
   expandedToolIds: string[];
   isAssistantLoading: boolean;
+  isHistoryLoading: boolean;
   pendingToolConfirmations: PendingToolConfirmation[];
   pendingQuestions: PendingQuestion[];
   pendingRollbackConfirmation: PendingRollbackConfirmation | null;
