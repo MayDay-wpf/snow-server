@@ -64,7 +64,17 @@ export default {
     cancel: "Cancel",
     forceOfflineSuccess: "Force offline signal sent",
     forceOfflineFailed: "Force offline failed, please try again",
+    deleteAccount: "Delete Account",
+    deleteAccountConfirmTitle: "Confirm Account Deletion",
+    deleteAccountConfirm:
+      "This action cannot be undone. Enter your current password to continue.",
+    deleteAccountPasswordPlaceholder: "Enter current password",
+    deleteAccountConfirmAction: "Delete Account",
+    deleteAccountPasswordRequired: "Please enter your password",
+    deleteAccountSuccess: "Account deleted",
+    deleteAccountFailed: "Failed to delete account, please try again",
   },
+
   chat: {
     back: "Back",
     newSession: "New Session",
@@ -77,6 +87,8 @@ export default {
     toolName: "Tool",
     approve: "Approve",
     approveAlways: "Always Approve",
+    rejectWithReply: "Reject & Reply",
+    rejectReplyPlaceholder: "Enter a rejection reason (optional)",
     reject: "Reject",
     questionTitle: "Question",
     submit: "Submit",

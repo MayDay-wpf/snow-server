@@ -1,4 +1,5 @@
 import { getConfig } from "../config";
+import { getToken } from "../utils/auth";
 
 /**
  * 用户登录参数
@@ -13,6 +14,10 @@ export interface LoginParams {
  */
 export interface RegisterParams {
   username: string;
+  password: string;
+}
+
+export interface DeleteAccountParams {
   password: string;
 }
 
@@ -235,4 +240,51 @@ export function validatePassword(password: string): {
     return { valid: false, message: "Password must be at least 6 characters" };
   }
   return { valid: true, message: "" };
+}
+
+/**
+ * 销毁当前登录账号
+ * @param params 销毁账号参数
+ * @returns 操作结果
+ */
+export async function deleteAccount(
+  params: DeleteAccountParams
+): Promise<ApiResponse<void>> {
+  try {
+    const token = getToken();
+    if (!token) {
+      return {
+        success: false,
+        message: "Authentication required",
+      };
+    }
+
+    const response = await fetch(`${getApiUrl()}/auth/delete-account`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(params),
+    });
+
+    const data: AuthResponse = await response.json();
+
+    if (!response.ok) {
+      return {
+        success: false,
+        message: data.message || "Delete account failed",
+      };
+    }
+
+    return {
+      success: true,
+      message: data.message,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Network error",
+    };
+  }
 }

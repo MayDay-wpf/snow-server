@@ -64,4 +64,27 @@ public class AuthController : ControllerBase
             Email = email
         });
     }
+
+    [Authorize]
+    [HttpPost("delete-account")]
+    public async Task<ActionResult<AuthResponse>> DeleteAccount([FromBody] DeleteAccountRequest request)
+    {
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out var userId))
+        {
+            return Unauthorized(new AuthResponse
+            {
+                Success = false,
+                Message = "用户认证信息无效"
+            });
+        }
+
+        var result = await _authService.DeleteAccountAsync(userId, request);
+        if (!result.Success)
+        {
+            return BadRequest(result);
+        }
+
+        return Ok(result);
+    }
 }

@@ -3,6 +3,8 @@ import { ref, watch, onMounted, onUnmounted, onActivated } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { clearAuth, getUserInfo } from "../utils/auth";
+
+import { deleteAccount } from "../api/auth";
 import {
   LogOut,
   Settings,
@@ -13,6 +15,7 @@ import {
   RefreshCw,
   Power,
 } from "lucide-vue-next";
+
 import Select from "../components/Select.vue";
 import {
   useTheme,
@@ -172,6 +175,54 @@ const handleLogout = () => {
   instanceHub.disconnect();
   clearAuth();
   router.push({ name: "login" });
+};
+
+const showDeleteAccountModal = ref(false);
+const deleteAccountPassword = ref("");
+const deleteAccountSubmitting = ref(false);
+
+const openDeleteAccountModal = () => {
+  showDeleteAccountModal.value = true;
+  deleteAccountPassword.value = "";
+};
+
+const closeDeleteAccountModal = () => {
+  if (deleteAccountSubmitting.value) {
+    return;
+  }
+  showDeleteAccountModal.value = false;
+  deleteAccountPassword.value = "";
+};
+
+const confirmDeleteAccount = async () => {
+  if (deleteAccountSubmitting.value) {
+    return;
+  }
+
+  if (!deleteAccountPassword.value) {
+    alert.error(t("home.deleteAccountPasswordRequired"));
+    return;
+  }
+
+  deleteAccountSubmitting.value = true;
+  try {
+    const result = await deleteAccount({
+      password: deleteAccountPassword.value,
+    });
+    if (!result.success) {
+      alert.error(result.message || t("home.deleteAccountFailed"));
+      return;
+    }
+
+    alert.success(result.message || t("home.deleteAccountSuccess"));
+    closeDeleteAccountModal();
+    handleLogout();
+  } catch (error) {
+    console.error("Delete account failed:", error);
+    alert.error(t("home.deleteAccountFailed"));
+  } finally {
+    deleteAccountSubmitting.value = false;
+  }
 };
 
 // ==================== SignalR 连接管理 ====================
@@ -444,6 +495,12 @@ onActivated(async () => {
               <LogOut :size="14" />
               <span>{{ t("home.logout") || "Logout" }}</span>
             </button>
+            <button class="delete-account-btn" @click="openDeleteAccountModal">
+              <Power :size="14" />
+              <span>
+                {{ t("home.deleteAccount") || "Delete Account" }}
+              </span>
+            </button>
           </div>
         </div>
       </Transition>
@@ -575,6 +632,53 @@ onActivated(async () => {
                 forceOfflineSubmitting
                   ? t("home.connecting") || "Processing..."
                   : t("home.forceOfflineConfirmAction") || "Force Offline"
+              }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <Transition name="modal-fade">
+      <div
+        v-if="showDeleteAccountModal"
+        class="force-offline-modal-overlay"
+        @click="closeDeleteAccountModal"
+      >
+        <div class="force-offline-modal" @click.stop>
+          <div class="force-offline-modal-header">
+            <h4>{{ t("home.deleteAccountConfirmTitle") }}</h4>
+          </div>
+          <p class="force-offline-modal-desc">
+            {{ t("home.deleteAccountConfirm") }}
+          </p>
+          <input
+            v-model="deleteAccountPassword"
+            class="delete-account-password-input"
+            type="password"
+            :placeholder="t('home.deleteAccountPasswordPlaceholder')"
+            :disabled="deleteAccountSubmitting"
+            autocomplete="current-password"
+          />
+          <div class="force-offline-modal-actions">
+            <button
+              class="force-offline-modal-btn cancel"
+              type="button"
+              :disabled="deleteAccountSubmitting"
+              @click="closeDeleteAccountModal"
+            >
+              {{ t("home.cancel") || "Cancel" }}
+            </button>
+            <button
+              class="force-offline-modal-btn confirm"
+              type="button"
+              :disabled="deleteAccountSubmitting"
+              @click="confirmDeleteAccount"
+            >
+              {{
+                deleteAccountSubmitting
+                  ? t("home.connecting") || "Processing..."
+                  : t("home.deleteAccountConfirmAction") || "Delete"
               }}
             </button>
           </div>
@@ -815,6 +919,28 @@ onActivated(async () => {
   background: rgba(239, 68, 68, 0.1);
   border-color: #ef4444;
   color: #ef4444;
+}
+
+.delete-account-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.delete-account-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgba(239, 68, 68, 0.7);
 }
 
 /* 连接错误提示 */
@@ -1125,6 +1251,23 @@ onActivated(async () => {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.delete-account-password-input {
+  width: 100%;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  padding: 0 0.625rem;
+  margin-bottom: 0.875rem;
+}
+
+.delete-account-password-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
 }
 
 .force-offline-modal-btn {

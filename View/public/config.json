@@ -1,5 +1,5 @@
 {
-  "baseUrl": "http://localhost:5136/api",
+  "baseUrl": "http://localhost:5000/api",
   "appName": "Snow Server",
   "version": "1.0.0"
 }

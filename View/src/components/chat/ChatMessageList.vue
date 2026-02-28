@@ -30,6 +30,7 @@
           <button
             v-if="message.role === 'user'"
             class="rollback-button"
+            :disabled="isSessionBusy"
             @click="$emit('rollback-message', index)"
           >
             {{ t("chat.rollback") }}
@@ -223,6 +224,7 @@ const props = defineProps<{
   expandedToolIds: string[];
   isAssistantLoading: boolean;
   isHistoryLoading: boolean;
+  isSessionBusy: boolean;
 }>();
 defineEmits<{
   (e: "toggle-tool", toolId: string): void;
@@ -409,6 +411,16 @@ const formatJsonHighlighted = (data: string | object) => {
   background: var(--bg-primary);
   border-color: var(--color-accent);
   color: var(--color-accent);
+}
+.rollback-button:disabled,
+.message-wrapper:hover .rollback-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.rollback-button:disabled:hover {
+  background: transparent;
+  border-color: var(--border-color);
+  color: var(--text-secondary);
 }
 .message-content {
   padding: 14px 18px;

@@ -7,6 +7,7 @@
           :expanded-tool-ids="expandedToolIds"
           :is-assistant-loading="isAssistantLoading"
           :is-history-loading="isHistoryLoading"
+          :is-session-busy="isSessionBusy"
           @toggle-tool="emit('toggle-tool', $event)"
           @rollback-message="emit('rollback-message', $event)"
         />
@@ -54,10 +55,35 @@
           </button>
           <button
             class="btn-reject"
+            @click="openRejectReplyInput(item.toolCallId)"
+          >
+            {{ t("chat.rejectWithReply") }}
+          </button>
+          <button
+            class="btn-reject"
             @click="emit('submit-tool-confirmation', item.toolCallId, 'reject')"
           >
             {{ t("chat.reject") }}
           </button>
+        </div>
+        <div v-if="activeRejectReplyToolCallId === item.toolCallId">
+          <textarea
+            v-model="rejectReplyReason"
+            class="custom-input"
+            rows="3"
+            :placeholder="t('chat.rejectReplyPlaceholder')"
+          />
+          <div class="card-actions">
+            <button
+              class="btn-primary"
+              @click="submitRejectWithReply(item.toolCallId)"
+            >
+              {{ t("chat.submit") }}
+            </button>
+            <button class="btn-secondary" @click="cancelRejectReplyInput">
+              {{ t("chat.cancel") }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -185,7 +211,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { X } from "lucide-vue-next";
 import ChatInput from "./ChatInput.vue";
 import ChatMessageList from "./ChatMessageList.vue";
@@ -229,6 +255,7 @@ const props = defineProps<{
   expandedToolIds: string[];
   isAssistantLoading: boolean;
   isHistoryLoading: boolean;
+  isSessionBusy: boolean;
   pendingToolConfirmations: PendingToolConfirmation[];
   pendingQuestions: PendingQuestion[];
   pendingRollbackConfirmation: PendingRollbackConfirmation | null;
@@ -246,7 +273,8 @@ const emit = defineEmits<{
   (
     event: "submit-tool-confirmation",
     toolCallId: string,
-    result: "approve" | "approve_always" | "reject"
+    result: "approve" | "approve_always" | "reject" | "reject_with_reply",
+    reason?: string
   ): void;
   (event: "toggle-question-option", toolCallId: string, option: string): void;
   (event: "submit-question", item: PendingQuestion): void;
@@ -264,11 +292,33 @@ const emit = defineEmits<{
   (event: "update:inputMessage", value: string): void;
   (event: "update:filePickerQuery", value: string): void;
 }>();
-
 const filePickerQuery = computed({
   get: () => props.filePickerQuery,
   set: (value: string) => emit("update:filePickerQuery", value),
 });
+
+const activeRejectReplyToolCallId = ref<string | null>(null);
+const rejectReplyReason = ref("");
+
+const openRejectReplyInput = (toolCallId: string) => {
+  activeRejectReplyToolCallId.value = toolCallId;
+  rejectReplyReason.value = "";
+};
+
+const cancelRejectReplyInput = () => {
+  activeRejectReplyToolCallId.value = null;
+  rejectReplyReason.value = "";
+};
+
+const submitRejectWithReply = (toolCallId: string) => {
+  emit(
+    "submit-tool-confirmation",
+    toolCallId,
+    "reject_with_reply",
+    rejectReplyReason.value.trim()
+  );
+  cancelRejectReplyInput();
+};
 </script>
 
 <style scoped>

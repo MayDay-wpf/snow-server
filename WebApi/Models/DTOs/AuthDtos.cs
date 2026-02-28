@@ -26,6 +26,11 @@ public class RefreshTokenRequest
     public string RefreshToken { get; set; } = string.Empty;
 }
 
+public class DeleteAccountRequest
+{
+    public string Password { get; set; } = string.Empty;
+}
+
 public class UserDto
 {
     public int Id { get; set; }

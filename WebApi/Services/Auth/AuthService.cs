@@ -138,6 +138,46 @@ public class AuthService : IAuthService
         };
     }
 
+    public async Task<AuthResponse> DeleteAccountAsync(int userId, DeleteAccountRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            return new AuthResponse
+            {
+                Success = false,
+                Message = "密码不能为空"
+            };
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user == null)
+        {
+            return new AuthResponse
+            {
+                Success = false,
+                Message = "用户不存在"
+            };
+        }
+
+        if (!VerifyPassword(request.Password, user.PasswordHash))
+        {
+            return new AuthResponse
+            {
+                Success = false,
+                Message = "密码错误"
+            };
+        }
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        return new AuthResponse
+        {
+            Success = true,
+            Message = "账号已销毁"
+        };
+    }
+
     public string HashPassword(string password)
     {
         using var sha256 = SHA256.Create();

@@ -9,6 +9,7 @@
       :message-count-text="t('chat.messageCount')"
       :settings-title="t('settings.title')"
       :history-title="t('chat.historyListTitle')"
+      :is-session-busy="isAssistantLoading"
       @go-back="goBack"
       @create-new-session="createNewSession"
       @toggle-settings="toggleSettings"
@@ -87,6 +88,7 @@
               class="history-item-btn"
               type="button"
               :title="session.id"
+              :disabled="isAssistantLoading"
               @click="resumeSessionById(session.id)"
             >
               <span class="history-item-title">{{
@@ -120,6 +122,7 @@
       :expanded-tool-ids="expandedToolIds"
       :is-assistant-loading="isAssistantLoading"
       :is-history-loading="isHistoryLoading"
+      :is-session-busy="isAssistantLoading"
       :pending-tool-confirmations="pendingToolConfirmations"
       :pending-questions="pendingQuestions"
       :pending-rollback-confirmation="pendingRollbackConfirmation"
@@ -192,6 +195,17 @@ interface SessionData {
   sessionTitle?: string;
   messageCount?: number;
   messages?: MessageItem[];
+  inFlightState?: {
+    isMessageProcessing?: boolean;
+    pendingToolConfirmations?: PendingToolConfirmation[];
+    pendingQuestions?: Array<{
+      question: string;
+      options: string[];
+      toolCallId: string;
+      multiSelect?: boolean;
+    }>;
+    pendingRollbackConfirmation?: PendingRollbackConfirmation | null;
+  };
 }
 
 interface PendingToolConfirmation {
@@ -379,6 +393,10 @@ const loadMoreSessionList = async () => {
 
 const toggleHistoryList = async (event?: Event) => {
   event?.stopPropagation();
+  if (isAssistantLoading.value) {
+    return;
+  }
+
   if (sessionListState.value.visible) {
     closeHistoryDrawer();
     return;
@@ -387,6 +405,10 @@ const toggleHistoryList = async (event?: Event) => {
 };
 
 const resumeSessionById = async (sessionId: string) => {
+  if (isAssistantLoading.value) {
+    return;
+  }
+
   isHistoryLoading.value = true;
   sessionData.value = { messages: [] };
   try {
@@ -498,6 +520,68 @@ const parseContextInfo = (data: string) => {
   }
 };
 
+const applyInFlightState = (inFlightState?: SessionData["inFlightState"]) => {
+  if (!inFlightState) {
+    pendingToolConfirmations.value = [];
+    pendingQuestions.value = [];
+    pendingRollbackConfirmation.value = null;
+    return;
+  }
+
+  pendingToolConfirmations.value = Array.isArray(
+    inFlightState.pendingToolConfirmations
+  )
+    ? inFlightState.pendingToolConfirmations.filter(
+        (x): x is PendingToolConfirmation =>
+          typeof x?.toolName === "string" &&
+          typeof x?.toolArguments === "string" &&
+          typeof x?.toolCallId === "string"
+      )
+    : [];
+
+  pendingQuestions.value = Array.isArray(inFlightState.pendingQuestions)
+    ? inFlightState.pendingQuestions
+        .filter(
+          (
+            x
+          ): x is {
+            question: string;
+            options: string[];
+            toolCallId: string;
+            multiSelect?: boolean;
+          } =>
+            typeof x?.question === "string" &&
+            Array.isArray(x?.options) &&
+            typeof x?.toolCallId === "string"
+        )
+        .map((x) => ({
+          question: x.question,
+          options: x.options.filter(
+            (item): item is string => typeof item === "string"
+          ),
+          toolCallId: x.toolCallId,
+          selectedOptions: [],
+          customInput: "",
+        }))
+    : [];
+
+  const rollback = inFlightState.pendingRollbackConfirmation;
+  pendingRollbackConfirmation.value =
+    rollback && Array.isArray(rollback.filePaths)
+      ? {
+          filePaths: rollback.filePaths.filter(
+            (item): item is string => typeof item === "string"
+          ),
+          notebookCount:
+            typeof rollback.notebookCount === "number"
+              ? rollback.notebookCount
+              : 0,
+        }
+      : null;
+
+  isAssistantLoading.value = Boolean(inFlightState.isMessageProcessing);
+};
+
 const waitForConnection = (timeout: number): Promise<void> => {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -524,14 +608,38 @@ const ensureHubConnected = async () => {
     await waitForConnection(10000);
   }
 };
-const requestContextInfo = async () => {
-  isHistoryLoading.value = true;
+const requestContextInfo = async (options?: { silent?: boolean }) => {
+  if (!options?.silent) {
+    isHistoryLoading.value = true;
+  }
   try {
     await ensureHubConnected();
     await instanceHub.requestContextInfo(instanceId.value);
   } catch {
-    isHistoryLoading.value = false;
+    if (!options?.silent) {
+      isHistoryLoading.value = false;
+    }
     throw new Error("request context failed");
+  }
+};
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const isInteractionSettled = () =>
+  !isAssistantLoading.value &&
+  pendingToolConfirmations.value.length === 0 &&
+  pendingQuestions.value.length === 0 &&
+  !pendingRollbackConfirmation.value;
+
+const refreshContextUntilSettled = async () => {
+  const maxAttempts = 4;
+  for (let i = 0; i < maxAttempts; i++) {
+    await requestContextInfo({ silent: true });
+    await sleep(250);
+    if (isInteractionSettled()) {
+      return;
+    }
   }
 };
 
@@ -568,6 +676,10 @@ const interruptMessageProcessing = async () => {
 };
 
 const createNewSession = async () => {
+  if (isAssistantLoading.value) {
+    return;
+  }
+
   try {
     await ensureHubConnected();
     await instanceHub.sendClearSession(instanceId.value);
@@ -582,6 +694,10 @@ const createNewSession = async () => {
 };
 
 const rollbackMessageByIndex = async (messageIndex: number) => {
+  if (isAssistantLoading.value) {
+    return;
+  }
+
   const messages = parsedMessages.value;
   if (!messages[messageIndex] || messages[messageIndex].role !== "user") {
     return;
@@ -615,16 +731,27 @@ const formatJson = (data: string | object) => {
 
 const submitToolConfirmation = async (
   toolCallId: string,
-  result: "approve" | "approve_always" | "reject"
+  result: "approve" | "approve_always" | "reject" | "reject_with_reply",
+  reason?: string
 ) => {
   await instanceHub.sendToolConfirmationResult(
     instanceId.value,
     toolCallId,
-    result
+    result,
+    reason?.trim()
   );
   pendingToolConfirmations.value = pendingToolConfirmations.value.filter(
     (x) => x.toolCallId !== toolCallId
   );
+
+  // 用户拒绝后，短轮询拉取上下文，避免首次拉取命中实例尚未收敛的旧状态
+  if (result === "reject") {
+    try {
+      await refreshContextUntilSettled();
+    } catch {
+      // Ignore refresh failure, keep local interaction flow responsive
+    }
+  }
 };
 
 const toggleQuestionOption = (toolCallId: string, option: string) => {
@@ -767,7 +894,10 @@ const setupListeners = () => {
       if (receivedInstanceId !== instanceId.value) return;
       isHistoryLoading.value = false;
       const parsed = parseContextInfo(data);
-      if (parsed) sessionData.value = parsed;
+      if (parsed) {
+        sessionData.value = parsed;
+        applyInFlightState(parsed.inFlightState);
+      }
     }
   );
 
@@ -777,8 +907,10 @@ const setupListeners = () => {
       isAssistantLoading.value = false;
       isHistoryLoading.value = false;
       const parsed = parseContextInfo(replyMessage);
-      if (parsed?.messages) sessionData.value = parsed;
-      else addAssistantText(replyMessage);
+      if (parsed?.messages) {
+        sessionData.value = parsed;
+        applyInFlightState(parsed.inFlightState);
+      } else addAssistantText(replyMessage);
     }
   );
 

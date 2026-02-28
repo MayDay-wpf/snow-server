@@ -8,6 +8,7 @@
     <button
       class="history-btn"
       :title="historyTitle"
+      :disabled="isSessionBusy"
       @click="$emit('toggleHistoryList', $event)"
     >
       <List :size="18" />
@@ -21,7 +22,11 @@
     </div>
 
     <div class="header-actions">
-      <button class="new-session-button" @click="$emit('createNewSession')">
+      <button
+        class="new-session-button"
+        :disabled="isSessionBusy"
+        @click="$emit('createNewSession')"
+      >
         <Plus :size="16" />
         <span>{{ newSessionText }}</span>
       </button>
@@ -49,6 +54,7 @@ const props = defineProps<{
   messageCountText: string;
   settingsTitle: string;
   historyTitle: string;
+  isSessionBusy: boolean;
 }>();
 
 defineEmits<{
@@ -145,6 +151,20 @@ const displayTitle = computed(() => props.sessionTitle || props.instanceName);
 
 .new-session-button:hover {
   opacity: 0.9;
+}
+
+.new-session-button:disabled,
+.history-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.new-session-button:disabled:hover,
+.history-btn:disabled:hover {
+  opacity: 0.6;
+  background: inherit;
+  border-color: inherit;
+  color: inherit;
 }
 
 .history-btn,
