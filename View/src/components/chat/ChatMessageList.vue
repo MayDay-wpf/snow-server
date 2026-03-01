@@ -1,5 +1,5 @@
 <template>
-  <div class="messages-area" ref="messagesArea">
+  <div class="messages-area">
     <div v-if="isHistoryLoading" class="history-loading-state">
       <div class="history-loading-card">
         <div class="history-loading-spinner"></div>
@@ -99,7 +99,36 @@
               v-show="expandedToolIds.includes(message.tool_call_id)"
               class="tool-body"
             >
+              <!-- 文件编辑/创建结果 - 使用代码差异组件 -->
+              <CodeDiffViewer
+                v-if="isFilesystemEditResult(message.content)"
+                :file-path="getEditResult(message.content).filePath || ''"
+                :old-content="getEditResult(message.content).oldContent"
+                :new-content="getEditResult(message.content).newContent || ''"
+                :line-info="getEditResult(message.content).lineInfo"
+                :t="t"
+              />
+
+              <!-- 文件创建结果 -->
+              <CodeDiffViewer
+                v-else-if="isCreateFileResult(message.content)"
+                :is-create-file="true"
+                :file-path="getCreateFilePath(message.content)"
+                :content="message.content"
+                :t="t"
+              />
+
+              <!-- TODO 工具结果 -->
+              <TodoResultViewer
+                v-else-if="isTodoResult(message.content)"
+                :data="getTodoData(message.content)"
+                :operation="getTodoOperation(message.content)"
+                :t="t"
+              />
+
+              <!-- 默认 JSON 显示 -->
               <pre
+                v-else
                 class="code-block highlighted"
                 v-html="formatJsonHighlighted(message.content)"
               ></pre>
@@ -133,8 +162,10 @@ import javascript from "highlight.js/lib/languages/javascript";
 import typescript from "highlight.js/lib/languages/typescript";
 import xml from "highlight.js/lib/languages/xml";
 import MarkdownIt from "markdown-it";
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import CodeDiffViewer from "./CodeDiffViewer.vue";
+import TodoResultViewer from "./TodoResultViewer.vue";
 
 const { t } = useI18n();
 
@@ -231,7 +262,6 @@ defineEmits<{
   (e: "rollback-message", messageIndex: number): void;
 }>();
 
-const messagesArea = ref<HTMLElement | null>(null);
 const markdown = new MarkdownIt({
   html: false,
   breaks: true,
@@ -245,12 +275,9 @@ const markdown = new MarkdownIt({
 });
 
 watch(
-  [() => props.messages, () => props.isAssistantLoading],
-  async () => {
-    await nextTick();
-    if (messagesArea.value) {
-      messagesArea.value.scrollTop = messagesArea.value.scrollHeight;
-    }
+  () => props.messages,
+  () => {
+    // 移除此处的自动滚动，由父组件控制
   },
   { deep: true }
 );
@@ -294,6 +321,98 @@ const formatJsonHighlighted = (data: string | object) => {
       "typescript",
     ]).value;
   }
+};
+
+// 检测是否为文件编辑结果
+const isFilesystemEditResult = (content: string): boolean => {
+  try {
+    const obj = JSON.parse(content);
+    return (
+      obj &&
+      typeof obj === "object" &&
+      (obj.oldContent !== undefined || obj.newContent !== undefined) &&
+      obj.filePath !== undefined &&
+      !obj.isCreateFile
+    );
+  } catch {
+    // 检查字符串格式的编辑结果
+    return (
+      content.includes("File edited successfully") &&
+      (content.includes("oldContent") || content.includes("newContent"))
+    );
+  }
+};
+
+// 解析编辑结果
+const getEditResult = (
+  content: string
+): {
+  filePath?: string;
+  oldContent?: string;
+  newContent?: string;
+  lineInfo?: string;
+} => {
+  try {
+    const obj = JSON.parse(content);
+    return {
+      filePath: obj.filePath,
+      oldContent: obj.oldContent,
+      newContent: obj.newContent,
+      lineInfo: obj.matchLocation
+        ? `lines ${obj.matchLocation.startLine}-${obj.matchLocation.endLine}`
+        : obj.contextStartLine
+        ? `context ${obj.contextStartLine}-${obj.contextEndLine}`
+        : undefined,
+    };
+  } catch {
+    return {};
+  }
+};
+
+// 检测是否为文件创建结果
+const isCreateFileResult = (content: string): boolean => {
+  return content.includes("File created successfully");
+};
+
+// 获取创建文件的路径
+const getCreateFilePath = (content: string): string => {
+  const match = content.match(/File created successfully:\s*(.+)/);
+  return match?.[1]?.trim() || "";
+};
+
+// 检测是否为 TODO 结果
+const isTodoResult = (content: string): boolean => {
+  try {
+    const obj = JSON.parse(content);
+    return (
+      obj &&
+      typeof obj === "object" &&
+      obj.sessionId !== undefined &&
+      Array.isArray(obj.todos)
+    );
+  } catch {
+    return false;
+  }
+};
+
+// 获取 TODO 数据
+const getTodoData = (content: string) => {
+  try {
+    return JSON.parse(content);
+  } catch {
+    return { todos: [] };
+  }
+};
+
+// 获取 TODO 操作类型
+const getTodoOperation = (
+  content: string
+): "get" | "add" | "update" | "delete" | undefined => {
+  // 根据内容特征判断操作类型
+  if (content.includes("todoAdded")) return "add";
+  if (content.includes("todoUpdated")) return "update";
+  if (content.includes("todoDeleted")) return "delete";
+  return undefined;
 };
 </script>
 

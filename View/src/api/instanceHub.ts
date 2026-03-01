@@ -870,6 +870,44 @@ class InstanceHubManager {
       cancelled ?? false
     );
   }
+
+  /**
+   * 发送压缩请求给实例
+   */
+  async sendCompactRequest(instanceId: string): Promise<void> {
+    if (!this.connection) {
+      throw new Error("Hub connection is not initialized");
+    }
+    if (this.connection.state !== signalR.HubConnectionState.Connected) {
+      throw new Error("Hub connection is not established");
+    }
+
+    await this.connection.invoke("SendCompactRequest", instanceId);
+  }
+
+  // ==================== 压缩事件订阅 ====================
+
+  onCompactStarted(callback: (instanceId: string) => void): () => void {
+    const handler = (instanceId: string) => {
+      callback(instanceId);
+    };
+    this.connection?.on("ReceiveCompactStarted", handler);
+    return () => {
+      this.connection?.off("ReceiveCompactStarted", handler);
+    };
+  }
+
+  onCompactCompleted(
+    callback: (instanceId: string, resultJson: string) => void
+  ): () => void {
+    const handler = (instanceId: string, resultJson: string) => {
+      callback(instanceId, resultJson);
+    };
+    this.connection?.on("ReceiveCompactCompleted", handler);
+    return () => {
+      this.connection?.off("ReceiveCompactCompleted", handler);
+    };
+  }
 }
 
 // 导出单例实例

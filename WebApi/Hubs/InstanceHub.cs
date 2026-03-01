@@ -731,6 +731,78 @@ public class InstanceHub : Hub<IInstanceClient>
     }
 
     /// <summary>
+    /// Web 客户端通知第三方实例执行上下文压缩
+    /// </summary>
+    public async Task SendCompactRequest(string instanceId)
+    {
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new HubException("User not authenticated");
+        }
+
+        var targetInstance = _connectionManager
+            .GetUserInstances(userId)
+            .FirstOrDefault(i => i.InstanceId == instanceId);
+
+        if (targetInstance == null)
+        {
+            _logger.LogWarning("Instance not found for compact request: {InstanceId} for user {UserId}", instanceId, userId);
+            throw new HubException("Instance not found");
+        }
+
+        _logger.LogInformation("Sending compact request to instance: {InstanceId}", instanceId);
+
+        await Clients.Client(targetInstance.ConnectionId).ReceiveCompactRequest();
+    }
+
+    /// <summary>
+    /// 第三方实例通知压缩开始
+    /// </summary>
+    public async Task NotifyCompactStarted()
+    {
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new HubException("User not authenticated");
+        }
+
+        var connection = _connectionManager.GetConnection(Context.ConnectionId);
+        if (connection == null)
+        {
+            _logger.LogWarning("Connection not found for compact started notification");
+            return;
+        }
+
+        _logger.LogInformation("Compact started from instance: {InstanceId}", connection.InstanceId);
+
+        await Clients.Group($"user:{userId}").ReceiveCompactStarted(connection.InstanceId);
+    }
+
+    /// <summary>
+    /// 第三方实例通知压缩完成
+    /// </summary>
+    public async Task NotifyCompactCompleted(string resultJson)
+    {
+        var userId = Context.UserIdentifier;
+        if (string.IsNullOrEmpty(userId))
+        {
+            throw new HubException("User not authenticated");
+        }
+
+        var connection = _connectionManager.GetConnection(Context.ConnectionId);
+        if (connection == null)
+        {
+            _logger.LogWarning("Connection not found for compact completed notification");
+            return;
+        }
+
+        _logger.LogInformation("Compact completed from instance: {InstanceId}", connection.InstanceId);
+
+        await Clients.Group($"user:{userId}").ReceiveCompactCompleted(connection.InstanceId, resultJson);
+    }
+
+    /// <summary>
     /// 连接断开时清理
     /// </summary>
     public override async Task OnDisconnectedAsync(Exception? exception)
@@ -868,6 +940,21 @@ public interface IInstanceClient
     /// Web 客户端接收实例返回的会话列表
     /// </summary>
     Task ReceiveSessionListResult(string instanceId, string requestId, string sessionListJson);
+
+    /// <summary>
+    /// 实例端接收 Web 发起的上下文压缩请求
+    /// </summary>
+    Task ReceiveCompactRequest();
+
+    /// <summary>
+    /// Web 客户端接收压缩开始通知
+    /// </summary>
+    Task ReceiveCompactStarted(string instanceId);
+
+    /// <summary>
+    /// Web 客户端接收压缩完成通知
+    /// </summary>
+    Task ReceiveCompactCompleted(string instanceId, string resultJson);
 }
 
 /// <summary>

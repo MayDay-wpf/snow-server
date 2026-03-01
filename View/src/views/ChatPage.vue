@@ -130,6 +130,9 @@
       :file-picker-query="filePickerQuery"
       :filtered-file-options="filteredFileOptions"
       :input-message="inputMessage"
+      :token-usage="sessionData?.tokenUsage"
+      :is-compressing="isCompressing"
+      :can-compact="canCompact"
       :t="t"
       :format-json="formatJson"
       @toggle-tool="toggleTool"
@@ -146,6 +149,7 @@
       @request-file-list="openFileListPicker"
       @update:inputMessage="inputMessage = $event"
       @update:filePickerQuery="filePickerQuery = $event"
+      @compact="sendCompactRequest"
     />
   </div>
 </template>
@@ -195,6 +199,16 @@ interface SessionData {
   sessionTitle?: string;
   messageCount?: number;
   messages?: MessageItem[];
+  tokenUsage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cached_tokens?: number;
+    percentage?: number;
+    max_tokens?: number;
+  };
   inFlightState?: {
     isMessageProcessing?: boolean;
     pendingToolConfirmations?: PendingToolConfirmation[];
@@ -410,7 +424,12 @@ const resumeSessionById = async (sessionId: string) => {
   }
 
   isHistoryLoading.value = true;
+  shouldPollAfterAssistantEvent.value = false;
   sessionData.value = { messages: [] };
+  pendingToolConfirmations.value = [];
+  pendingQuestions.value = [];
+  pendingRollbackConfirmation.value = null;
+  isAssistantLoading.value = false;
   try {
     await ensureHubConnected();
     await instanceHub.sendResumeSession(instanceId.value, sessionId);
@@ -461,6 +480,18 @@ const suppressAtTriggerOnce = ref(false);
 const isAssistantLoading = ref(false);
 const isHistoryLoading = ref(false);
 const shouldPollAfterAssistantEvent = ref(false);
+const isCompressing = ref(false);
+
+// Can compact only when dialog ended (not loading, no pending interactions)
+const canCompact = computed(() => {
+  return (
+    !isAssistantLoading.value &&
+    !isCompressing.value &&
+    pendingToolConfirmations.value.length === 0 &&
+    pendingQuestions.value.length === 0 &&
+    !pendingRollbackConfirmation.value
+  );
+});
 
 const parsedMessages = computed(() => sessionData.value?.messages || []);
 const filteredFileOptions = computed(() => {
@@ -519,6 +550,59 @@ const parseContextInfo = (data: string) => {
   } catch {
     return null;
   }
+};
+
+// 检测是否为文件编辑/创建结果
+const isFilesystemEditResult = (content: string): boolean => {
+  try {
+    const obj = JSON.parse(content);
+    return (
+      obj &&
+      typeof obj === "object" &&
+      obj.filePath &&
+      (obj.oldContent !== undefined || obj.newContent !== undefined)
+    );
+  } catch {
+    return (
+      content.includes("File edited successfully") &&
+      (content.includes("oldContent") || content.includes("newContent"))
+    );
+  }
+};
+
+// 检测是否为文件创建结果
+const isCreateFileResult = (content: string): boolean => {
+  return content.includes("File created successfully");
+};
+
+// 检测是否为 TODO 结果
+const isTodoResult = (content: string): boolean => {
+  try {
+    const obj = JSON.parse(content);
+    return (
+      obj &&
+      typeof obj === "object" &&
+      obj.sessionId !== undefined &&
+      Array.isArray(obj.todos)
+    );
+  } catch {
+    return false;
+  }
+};
+
+// 自动展开特殊工具结果
+const autoExpandSpecialToolResults = (messages: SessionData["messages"]) => {
+  messages?.forEach((msg) => {
+    if (msg.tool_call_id && msg.content) {
+      const isSpecialResult =
+        isFilesystemEditResult(msg.content) ||
+        isCreateFileResult(msg.content) ||
+        isTodoResult(msg.content);
+      if (isSpecialResult && msg.tool_call_id) {
+        expandedTools.value.add(msg.tool_call_id);
+      }
+    }
+  });
 };
 
 const applyInFlightState = (inFlightState?: SessionData["inFlightState"]) => {
@@ -835,8 +919,25 @@ const submitRollbackConfirmation = async (
       selectedFiles
     );
     pendingRollbackConfirmation.value = null;
+
+    // 提交确认后主动短轮询上下文，避免实例尚未收敛导致旧回滚状态回显
+    shouldPollAfterAssistantEvent.value = true;
+    await refreshContextUntilSettled({ initialDelayMs: 300 });
   } catch {
     addAssistantText("回滚确认提交失败，请检查连接");
+  }
+};
+
+const sendCompactRequest = async () => {
+  if (!instanceId.value || isCompressing.value) return;
+
+  isCompressing.value = true;
+  try {
+    await ensureHubConnected();
+    await instanceHub.sendCompactRequest(instanceId.value);
+  } catch (error) {
+    console.error("Failed to send compact request:", error);
+    isCompressing.value = false;
   }
 };
 
@@ -912,6 +1013,8 @@ let unsubQuestion: (() => void) | null = null;
 let unsubRollbackConfirm: (() => void) | null = null;
 let unsubFileList: (() => void) | null = null;
 let unsubSessionList: (() => void) | null = null;
+let unsubCompactStarted: (() => void) | null = null;
+let unsubCompactCompleted: (() => void) | null = null;
 
 const setupListeners = () => {
   unsubContext?.();
@@ -922,6 +1025,8 @@ const setupListeners = () => {
   unsubRollbackConfirm?.();
   unsubFileList?.();
   unsubSessionList?.();
+  unsubCompactStarted?.();
+  unsubCompactCompleted?.();
 
   unsubContext = instanceHub.onContextInfoReceived(
     (receivedInstanceId, data) => {
@@ -930,6 +1035,7 @@ const setupListeners = () => {
       const parsed = parseContextInfo(data);
       if (parsed) {
         sessionData.value = parsed;
+        autoExpandSpecialToolResults(parsed.messages);
         applyInFlightState(parsed.inFlightState);
         if (
           shouldPollAfterAssistantEvent.value &&
@@ -949,6 +1055,7 @@ const setupListeners = () => {
       const parsed = parseContextInfo(replyMessage);
       if (parsed?.messages) {
         sessionData.value = parsed;
+        autoExpandSpecialToolResults(parsed.messages);
         applyInFlightState(parsed.inFlightState);
       } else {
         addAssistantText(replyMessage);
@@ -961,6 +1068,8 @@ const setupListeners = () => {
   unsubProcessingCompleted = instanceHub.onMessageProcessingCompleted(
     (receivedInstanceId) => {
       if (receivedInstanceId !== instanceId.value) return;
+      // 先本地收敛，避免在上下文回包前短暂残留“运行中”
+      applyInFlightState(undefined);
       shouldPollAfterAssistantEvent.value = true;
       void refreshContextUntilSettled({ initialDelayMs: 600 });
     }
@@ -1110,6 +1219,39 @@ const setupListeners = () => {
           : t("chat.historyListEmpty"),
     };
   });
+
+  unsubCompactStarted = instanceHub.onCompactStarted((receivedInstanceId) => {
+    if (receivedInstanceId !== instanceId.value) return;
+    isCompressing.value = true;
+  });
+
+  unsubCompactCompleted = instanceHub.onCompactCompleted(
+    (receivedInstanceId, resultJson) => {
+      if (receivedInstanceId !== instanceId.value) return;
+      isCompressing.value = false;
+
+      try {
+        const result = JSON.parse(resultJson) as {
+          success: boolean;
+          messageCount?: number;
+          error?: string;
+        };
+        if (result.success) {
+          console.log(
+            `[Compact] Compression completed, message count: ${result.messageCount}`
+          );
+          // 刷新上下文以获取压缩后的消息
+          void requestContextInfo();
+        } else {
+          console.error("[Compact] Compression failed:", result.error);
+          addAssistantText(`上下文压缩失败: ${result.error || "未知错误"}`);
+        }
+      } catch {
+        console.error("[Compact] Failed to parse compression result");
+        addAssistantText("上下文压缩结果解析失败");
+      }
+    }
+  );
 };
 
 onMounted(async () => {

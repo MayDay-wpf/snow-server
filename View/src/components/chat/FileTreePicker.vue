@@ -7,6 +7,7 @@
       :class="{ 'is-file': node.isFile, 'is-folder': !node.isFile }"
       :style="{ paddingLeft: `${node.depth * 16 + 8}px` }"
       @click="handleNodeClick(node)"
+      @dblclick="handleNodeDblClick(node)"
     >
       <ChevronRight
         v-if="!node.isFile"
@@ -175,6 +176,11 @@ const handleNodeClick = (node: FlatNode) => {
     next.add(node.fullPath);
   }
   expandedFolders.value = next;
+};
+
+const handleNodeDblClick = (node: FlatNode) => {
+  // 双击选择目录或文件
+  emit("select", node.fullPath);
 };
 </script>
 
