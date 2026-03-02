@@ -2,9 +2,11 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using WebApi.Data;
+using WebApi.Hubs;
 using WebApi.Models;
 using WebApi.Models.DTOs;
 
@@ -14,11 +16,22 @@ public class AuthService : IAuthService
 {
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
+    private readonly UserConnectionManager _connectionManager;
+    private readonly IHubContext<InstanceHub, IInstanceClient> _hubContext;
+    private readonly ILogger<AuthService> _logger;
 
-    public AuthService(AppDbContext context, IConfiguration configuration)
+    public AuthService(
+        AppDbContext context, 
+        IConfiguration configuration,
+        UserConnectionManager connectionManager,
+        IHubContext<InstanceHub, IInstanceClient> hubContext,
+        ILogger<AuthService> logger)
     {
         _context = context;
         _configuration = configuration;
+        _connectionManager = connectionManager;
+        _hubContext = hubContext;
+        _logger = logger;
     }
 
     public async Task<AuthResponse> RegisterAsync(RegisterRequest request)
@@ -168,8 +181,47 @@ public class AuthService : IAuthService
             };
         }
 
+        // 1. 撤销该用户所有的 RefreshToken
+        var refreshTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == userId && !rt.IsRevoked)
+            .ToListAsync();
+        
+        foreach (var token in refreshTokens)
+        {
+            token.IsRevoked = true;
+        }
+        
+        _logger.LogInformation("用户 {UserId} 销毁账号：已撤销 {Count} 个刷新令牌", userId, refreshTokens.Count);
+
+        // 2. 断开该用户所有已连接的实例
+        var userInstances = _connectionManager.GetUserInstances(userId.ToString());
+        foreach (var instance in userInstances)
+        {
+            try
+            {
+                // 通知实例被强制下线
+                await _hubContext.Clients.Client(instance.ConnectionId).ReceiveForceOffline();
+                _logger.LogInformation("用户 {UserId} 销毁账号：已断开实例 {InstanceId}", userId, instance.InstanceId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "用户 {UserId} 销毁账号：断开实例 {InstanceId} 时发生异常", userId, instance.InstanceId);
+            }
+        }
+        
+        // 从连接管理器中移除所有连接
+        foreach (var instance in userInstances)
+        {
+            _connectionManager.RemoveConnection(instance.ConnectionId);
+        }
+        
+        _logger.LogInformation("用户 {UserId} 销毁账号：已断开 {Count} 个实例连接", userId, userInstances.Count);
+
+        // 3. 删除用户账号（级联删除会自动删除 RefreshTokens 记录）
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
+
+        _logger.LogInformation("用户 {UserId} ({Username}) 账号已成功销毁", userId, user.Username);
 
         return new AuthResponse
         {
